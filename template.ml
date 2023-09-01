@@ -58,7 +58,7 @@ let rec tipo_str (tp : tipo) : string =
   | TyList t ->
       tipo_str t ^ " list"
   | TyMaybe t ->
-      "maybe " (tipo_str t)
+      "maybe " ^ tipo_str t
   | TyVar n ->
       "X" ^ string_of_int n
 
@@ -152,11 +152,11 @@ let ftv_amb (g : tyenv) : int list = nub (ftv_amb' g)
 type equacoes_tipo = (tipo * tipo) list
 
 (*
-   a lista
-       [ (t1,t2) ; (u1,u2) ]
-   representa o conjunto de equações de tipo
-       { t1=t2, u1=u2 }
- *)
+a lista
+[ (t1,t2) ; (u1,u2) ]
+representa o conjunto de equações de tipo
+{ t1=t2, u1=u2 }
+*)
 
 (* imprime equações *)
 
