@@ -21,12 +21,14 @@ let diff (l1:'a list) (l2:'a list) : 'a list =
 
 
 (* tipos de L1 *)
-
 type tipo = 
     TyInt
   | TyBool
   | TyFn     of tipo * tipo
   | TyPair   of tipo * tipo 
+  | TyEither of tipo * tipo
+  | TyList   of tipo
+  | TyMaybe  of tipo
   | TyVar    of int   (* variáveis de tipo -- números *)
                       
 type politipo = (int list) * tipo
