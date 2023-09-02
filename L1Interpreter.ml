@@ -209,14 +209,22 @@ let rec appsubs (s : subst) (tp : tipo) : tipo =
       TyFn (appsubs s t1, appsubs s t2)
   | TyPair (t1, t2) ->
       TyPair (appsubs s t1, appsubs s t2)
+  | TyEither (t1, t2) ->
+      TyEither (appsubs s t1, appsubs s t2)
+  | TyList t ->
+      TyList (appsubs s t)
+  | TyMaybe t ->
+      TyMaybe (appsubs s t)
   | TyVar x -> (
     match lookup s x with None -> TyVar x | Some tp' -> tp' )
 
 (* aplicação de substituição a coleção de constraints *)
+
 let rec appconstr (s : subst) (c : equacoes_tipo) : equacoes_tipo =
   List.map (fun (a, b) -> (appsubs s a, appsubs s b)) c
 
 (* composição de substituições: s1 o s2  *)
+
 let rec compose (s1 : subst) (s2 : subst) : subst =
   let r1 = List.map (fun (x, y) -> (x, appsubs s1 y)) s2 in
   let vs, _ = List.split s2 in
@@ -235,6 +243,12 @@ let rec var_in_tipo (v : int) (tp : tipo) : bool =
       var_in_tipo v t1 || var_in_tipo v t2
   | TyPair (t1, t2) ->
       var_in_tipo v t1 || var_in_tipo v t2
+  | TyEither (t1, t2) ->
+      var_in_tipo v t1 || var_in_tipo v t2
+  | TyList t ->
+      var_in_tipo v t
+  | TyMaybe t ->
+      var_in_tipo v t
   | TyVar x ->
       v = x
 
