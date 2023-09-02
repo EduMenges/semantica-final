@@ -1,4 +1,4 @@
-(* auxiliares *)
+(* Auxiliares *)
 let rec lookup amb x =
   match amb with
   | [] ->
@@ -8,16 +8,16 @@ let rec lookup amb x =
 
 let update amb x item = (x, item) :: amb
 
-(* remove elementos repetidos de uma lista *)
+(* Remove elementos repetidos de uma lista *)
 let nub l =
   let ucons h t = if List.mem h t then t else h :: t in
   List.fold_right ucons l []
 
-(* calcula  l1 - l2 (como sets) *)
+(* Calcula  l1 - l2 (como sets) *)
 let diff (l1 : 'a list) (l2 : 'a list) : 'a list =
   List.filter (fun a -> not (List.mem a l2)) l1
 
-(* tipos de L1 *)
+(* Tipos de L1 *)
 type tipo =
   | TyInt
   | TyBool
@@ -26,11 +26,11 @@ type tipo =
   | TyEither of tipo * tipo
   | TyList of tipo
   | TyMaybe of tipo
-  | TyVar of int (* variáveis de tipo -- números *)
+  | TyVar of int (* Variáveis de tipo -- números *)
 
 type politipo = int list * tipo
 
-(* free type variables em um tipo *)
+(* Free type variables em um tipo *)
 let rec ftv (tp : tipo) : int list =
   match tp with
   | TyInt | TyBool ->
@@ -42,7 +42,7 @@ let rec ftv (tp : tipo) : int list =
   | TyVar n ->
       [n]
 
-(* impressao legível de monotipos  *)
+(* Impressao legível de monotipos  *)
 let rec tipo_str (tp : tipo) : string =
   match tp with
   | TyInt ->
@@ -62,8 +62,7 @@ let rec tipo_str (tp : tipo) : string =
   | TyVar n ->
       "X" ^ string_of_int n
 
-(* expressões de L1 sem anotações de tipo   *)
-
+(* Expressões de L1 sem anotações de tipo *)
 type ident = string
 
 type bop = Sum | Sub | Mult | Eq | Gt | Lt | Geq | Leq
@@ -73,17 +72,31 @@ type expr =
   | Bool of bool
   | Var of ident
   | Binop of bop * expr * expr
+  (* Pair related *)
   | Pair of expr * expr
   | Fst of expr
   | Snd of expr
   | If of expr * expr * expr
+  (* Function related*)
   | Fn of ident * expr
   | App of expr * expr
   | Let of ident * expr * expr
   | LetRec of ident * ident * expr * expr
+  | Pipe of expr * expr
+  (* List related *)
+  | Nil
+  | Node of expr * expr
+  | MatchList of expr * expr * ident * ident * expr
+  (* Maybe related *)
+  | Nothing
+  | Just of expr
+  | MatchMaybe of expr * expr * ident * expr
+  (* Either related *)
+  | Left of expr
+  | Right of expr
+  | MatchEither of expr * ident * expr * ident * expr
 
-(* impressão legível de expressão *)
-
+(* Impressão legível de expressão *)
 let rec expr_str (e : expr) : string =
   match e with
   | Num n ->
@@ -113,6 +126,7 @@ let rec expr_str (e : expr) : string =
             ">"
       in
       "( " ^ expr_str e1 ^ " " ^ s ^ " " ^ expr_str e2 ^ " )"
+  (* Pair related *)
   | Pair (e1, e2) ->
       "(" ^ expr_str e1 ^ "," ^ expr_str e2 ^ ")"
   | Fst e1 ->
@@ -122,6 +136,7 @@ let rec expr_str (e : expr) : string =
   | If (e1, e2, e3) ->
       "(if " ^ expr_str e1 ^ " then " ^ expr_str e2 ^ " else " ^ expr_str e3
       ^ " )"
+  (* Function related *)
   | Fn (x, e1) ->
       "(fn " ^ x ^ " => " ^ expr_str e1 ^ " )"
   | App (e1, e2) ->
@@ -131,35 +146,58 @@ let rec expr_str (e : expr) : string =
   | LetRec (f, x, e1, e2) ->
       "(let rec " ^ f ^ "= fn " ^ x ^ " => " ^ expr_str e1 ^ "\nin "
       ^ expr_str e2 ^ " )"
+  | Pipe (e1, e2) ->
+      expr_str e1 ^ "|>" ^ expr_str e2
+  (* List related *)
+  | Nil ->
+      "Nil"
+  | ListConst (e1, e2) ->
+      expr_str e1 ^ "::" ^ expr_str e2
+  | MatchList (e1, e2, x, xs, e3) ->
+      "match " ^ expr_str e1 ^ " with nil => " ^ expr_str e2 ^ "| " ^ x ^ "::"
+      ^ xs ^ " =>" ^ expr_str e3
+  (* Maybe related *)
+  | Nothing ->
+      "nothing"
+  | Just e ->
+      "Just " ^ expr_str e
+  | MatchMaybe (e1, e2, x, e3) ->
+      "match " ^ expr_str e1 ^ " with nothing => " ^ expr_str e2 ^ " | just "
+      ^ x ^ " => " ^ expr_str e3
+  (* Either related *)
+  | Left e ->
+      "left " ^ expr_str e
+  | Right e ->
+      "right " ^ expr_str e
+  | MatchEither (e1, x, e2, y, e3) ->
+      "match " ^ expr_str e1 ^ "with left " ^ x ^ " => " ^ expr_str e2
+      ^ "| right " ^ y ^ " => " ^ expr_str e3
 
-(* ambientes de tipo - modificados para polimorfismo *)
-
+(* Ambientes de tipo - modificados para polimorfismo *)
 type tyenv = (ident * politipo) list
 
-(* calcula todas as variáveis de tipo livres
+(* Calcula todas as variáveis de tipo livres
    do ambiente de tipos *)
 let rec ftv_amb' (g : tyenv) : int list =
   match g with
   | [] ->
       []
-  | (x, (vars, tp)) :: t ->
+  | (_, (vars, tp)) :: t ->
       diff (ftv tp) vars @ ftv_amb' t
 
 let ftv_amb (g : tyenv) : int list = nub (ftv_amb' g)
 
-(* equações de tipo  *)
-
+(* Equações de tipo  *)
 type equacoes_tipo = (tipo * tipo) list
 
 (*
-a lista
-[ (t1,t2) ; (u1,u2) ]
-representa o conjunto de equações de tipo
-{ t1=t2, u1=u2 }
-*)
+    a lista
+    [ (t1,t2) ; (u1,u2) ]
+    representa o conjunto de equações de tipo
+    { t1=t2, u1=u2 }
+    *)
 
-(* imprime equações *)
-
+(* Imprime equações *)
 let rec print_equacoes (c : equacoes_tipo) =
   match c with
   | [] ->
@@ -171,21 +209,18 @@ let rec print_equacoes (c : equacoes_tipo) =
       print_string "\n" ;
       print_equacoes t
 
-(* código para geração de novas variáveis de tipo *)
-
+(* Código para geração de novas variáveis de tipo *)
 let lastvar = ref 0
 
-let newvar (u : unit) : int =
+let newvar (_ : unit) : int =
   let x = !lastvar in
   lastvar := x + 1 ;
   x
 
-(* substituições de tipo *)
-
+(* Substituições de tipo *)
 type subst = (int * tipo) list
 
-(* imprime substituições  *)
-
+(* Imprime substituições  *)
 let rec print_subst (s : subst) =
   match s with
   | [] ->
@@ -197,8 +232,7 @@ let rec print_subst (s : subst) =
       print_string "\n" ;
       print_subst t
 
-(* aplicação de substituição a tipo *)
-
+(* Aplicação de substituição a tipo *)
 let rec appsubs (s : subst) (tp : tipo) : tipo =
   match tp with
   | TyInt ->
@@ -218,21 +252,18 @@ let rec appsubs (s : subst) (tp : tipo) : tipo =
   | TyVar x -> (
     match lookup s x with None -> TyVar x | Some tp' -> tp' )
 
-(* aplicação de substituição a coleção de constraints *)
-
-let rec appconstr (s : subst) (c : equacoes_tipo) : equacoes_tipo =
+(* Aplicação de substituição a coleção de constraints *)
+let appconstr (s : subst) (c : equacoes_tipo) : equacoes_tipo =
   List.map (fun (a, b) -> (appsubs s a, appsubs s b)) c
 
-(* composição de substituições: s1 o s2  *)
-
-let rec compose (s1 : subst) (s2 : subst) : subst =
+(* Composição de substituições: s1 o s2  *)
+let compose (s1 : subst) (s2 : subst) : subst =
   let r1 = List.map (fun (x, y) -> (x, appsubs s1 y)) s2 in
   let vs, _ = List.split s2 in
   let r2 = List.filter (fun (x, y) -> not (List.mem x vs)) s1 in
   r1 @ r2
 
-(* testa se variável de tipo ocorre em tipo *)
-
+(* Testa se variável de tipo ocorre em tipo *)
 let rec var_in_tipo (v : int) (tp : tipo) : bool =
   match tp with
   | TyInt ->
@@ -252,8 +283,7 @@ let rec var_in_tipo (v : int) (tp : tipo) : bool =
   | TyVar x ->
       v = x
 
-(* cria novas variáveis para politipos quando estes são instanciados *)
-
+(* Cria novas variáveis para politipos quando estes são instanciados *)
 let rec renamevars (pltp : politipo) : tipo =
   match pltp with
   | [], tp ->
@@ -262,8 +292,7 @@ let rec renamevars (pltp : politipo) : tipo =
       let h' = newvar () in
       appsubs [(h, TyVar h')] (renamevars (vars', tp))
 
-(* unificação *)
-
+(* Unificação *)
 exception UnifyFail of (tipo * tipo)
 
 let rec unify (c : equacoes_tipo) : subst =
@@ -298,7 +327,7 @@ let rec collect (g : tyenv) (e : expr) : equacoes_tipo * tipo =
     | None ->
         raise (CollectFail x)
     | Some pltp ->
-        ([], renamevars pltp) (* instancia poli *) )
+        ([], renamevars pltp) (* Instancia poli *) )
   | Num n ->
       ([], TyInt)
   | Bool b ->
@@ -363,7 +392,6 @@ let rec collect (g : tyenv) (e : expr) : equacoes_tipo * tipo =
       (c1 @ [(tp1, TyVar tB)] @ c2, tp2)
 
 (* INFERÊNCIA DE TIPOS - CHAMADA PRINCIPAL *)
-
 let type_infer (e : expr) : unit =
   print_string "\nExpressão:\n" ;
   print_string (expr_str e) ;
