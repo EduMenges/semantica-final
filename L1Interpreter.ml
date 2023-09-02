@@ -1,10 +1,12 @@
 (* Auxiliares *)
-let rec lookup amb x =
+
+(* Dado uma lista de pares, pesquisa pela chave e reotrna o valor *)
+let rec lookup amb key =
   match amb with
   | [] ->
       None
-  | (y, item) :: tl ->
-      if y = x then Some item else lookup tl x
+  | (head, item) :: tl ->
+      if head = key then Some item else lookup tl key
 
 let update amb x item = (x, item) :: amb
 
@@ -13,7 +15,7 @@ let nub l =
   let ucons h t = if List.mem h t then t else h :: t in
   List.fold_right ucons l []
 
-(* Calcula  l1 - l2 (como sets) *)
+(* Calcula l1 - l2 (como sets) *)
 let diff (l1 : 'a list) (l2 : 'a list) : 'a list =
   List.filter (fun a -> not (List.mem a l2)) l1
 
@@ -28,9 +30,7 @@ type tipo =
   | TyMaybe of tipo
   | TyVar of int (* Variáveis de tipo -- números *)
 
-type politipo = int list * tipo
-
-(* Free type variables em um tipo *)
+(* Free type variables em um tipo. *)
 let rec ftv (tp : tipo) : int list =
   match tp with
   | TyInt | TyBool ->
@@ -151,7 +151,7 @@ let rec expr_str (e : expr) : string =
   (* List related *)
   | Nil ->
       "Nil"
-  | ListConst (e1, e2) ->
+  | Node (e1, e2) ->
       expr_str e1 ^ "::" ^ expr_str e2
   | MatchList (e1, e2, x, xs, e3) ->
       "match " ^ expr_str e1 ^ " with nil => " ^ expr_str e2 ^ "| " ^ x ^ "::"
@@ -173,29 +173,13 @@ let rec expr_str (e : expr) : string =
       "match " ^ expr_str e1 ^ "with left " ^ x ^ " => " ^ expr_str e2
       ^ "| right " ^ y ^ " => " ^ expr_str e3
 
-(* Ambientes de tipo - modificados para polimorfismo *)
-type tyenv = (ident * politipo) list
-
-(* Calcula todas as variáveis de tipo livres
-   do ambiente de tipos *)
-let rec ftv_amb' (g : tyenv) : int list =
-  match g with
-  | [] ->
-      []
-  | (_, (vars, tp)) :: t ->
-      diff (ftv tp) vars @ ftv_amb' t
-
-let ftv_amb (g : tyenv) : int list = nub (ftv_amb' g)
-
-(* Equações de tipo  *)
-type equacoes_tipo = (tipo * tipo) list
-
-(*
-    a lista
+(* Equações de tipo.
+    A lista
     [ (t1,t2) ; (u1,u2) ]
     representa o conjunto de equações de tipo
     { t1=t2, u1=u2 }
-    *)
+*)
+type equacoes_tipo = (tipo * tipo) list
 
 (* Imprime equações *)
 let rec print_equacoes (c : equacoes_tipo) =
@@ -217,10 +201,13 @@ let newvar (_ : unit) : int =
   lastvar := x + 1 ;
   x
 
-(* Substituições de tipo *)
+(* Substituições de tipo
+    Variável de tipo
+    O tipo para substituir
+*)
 type subst = (int * tipo) list
 
-(* Imprime substituições  *)
+(* Imprime substituições *)
 let rec print_subst (s : subst) =
   match s with
   | [] ->
@@ -283,6 +270,22 @@ let rec var_in_tipo (v : int) (tp : tipo) : bool =
   | TyVar x ->
       v = x
 
+(* Uma tupla contendo uma list de inteiros e um tipo *)
+type politipo = int list * tipo
+
+(* Ambientes de tipo - modificados para polimorfismo *)
+type tyenv = (ident * politipo) list
+
+let rec ftv_amb' (g : tyenv) : int list =
+  match g with
+  | [] ->
+      []
+  | (_, (vars, tp)) :: t ->
+      diff (ftv tp) vars @ ftv_amb' t
+
+(* Calcula todas as variáveis de tipo livres do ambiente de tipos *)
+let ftv_amb (g : tyenv) : int list = nub (ftv_amb' g)
+
 (* Cria novas variáveis para politipos quando estes são instanciados *)
 let rec renamevars (pltp : politipo) : tipo =
   match pltp with
@@ -307,6 +310,12 @@ let rec unify (c : equacoes_tipo) : subst =
       unify ((x1, x2) :: (y1, y2) :: c')
   | (TyPair (x1, y1), TyPair (x2, y2)) :: c' ->
       unify ((x1, x2) :: (y1, y2) :: c')
+  | (TyEither (x1, y1), TyEither (x2, y2)) :: c' ->
+      unify ((x1, x2) :: (y1, y2) :: c')
+  | (TyMaybe a, TyMaybe b) :: c' ->
+      unify ((a, b) :: c')
+  | (TyList a, TyList b) :: c' ->
+      unify ((a, b) :: c')
   | (TyVar x1, TyVar x2) :: c' when x1 = x2 ->
       unify c'
   | (TyVar x1, tp2) :: c' ->
@@ -315,9 +324,10 @@ let rec unify (c : equacoes_tipo) : subst =
   | (tp1, TyVar x2) :: c' ->
       if var_in_tipo x2 tp1 then raise (UnifyFail (tp1, TyVar x2))
       else compose (unify (appconstr [(x2, tp1)] c')) [(x2, tp1)]
-  | (tp1, tp2) :: c' ->
+  | (tp1, tp2) :: _' ->
       raise (UnifyFail (tp1, tp2))
 
+(* Coleta *)
 exception CollectFail of string
 
 let rec collect (g : tyenv) (e : expr) : equacoes_tipo * tipo =
@@ -341,6 +351,7 @@ let rec collect (g : tyenv) (e : expr) : equacoes_tipo * tipo =
         let c1, tp1 = collect g e1 in
         let c2, tp2 = collect g e2 in
         (c1 @ c2 @ [(tp1, TyInt); (tp2, TyInt)], TyBool)
+  (* Pair related *)
   | Pair (e1, e2) ->
       let c1, tp1 = collect g e1 in
       let c2, tp2 = collect g e2 in
@@ -360,6 +371,7 @@ let rec collect (g : tyenv) (e : expr) : equacoes_tipo * tipo =
       let c2, tp2 = collect g e2 in
       let c3, tp3 = collect g e3 in
       (c1 @ c2 @ c3 @ [(tp1, TyBool); (tp2, tp3)], tp2)
+  (* Function related *)
   | Fn (x, e1) ->
       let tA = newvar () in
       let g' = (x, ([], TyVar tA)) :: g in
@@ -390,36 +402,89 @@ let rec collect (g : tyenv) (e : expr) : equacoes_tipo * tipo =
       let g' = (f, (polivars, tf1)) :: g in
       let c2, tp2 = collect g' e2 in
       (c1 @ [(tp1, TyVar tB)] @ c2, tp2)
+  | Pipe (e1, e2) ->
+      let c1, tp1 = collect g e1 in
+      let c2, tp2 = collect g e2 in
+      let tA = newvar () in
+      (c1 @ c2 @ [(tp2, TyFn (tp1, TyVar tA))], TyVar tA)
+  (* List related *)
+  | Nil ->
+      ([], TyList (TyVar (newvar ())))
+  | Node (e1, e2) ->
+      let c1, tp1 = collect g e1 in
+      let c2, tp2 = collect g e2 in
+      (c1 @ c2 @ [(tp2, TyList tp1)], tp2)
+  | MatchList (e1, e2, x, xs, e3) ->
+      let c1, tp1 = collect g e1 in
+      let c2, tp2 = collect g e2 in
+      let xNew = TyVar (newvar ()) in
+      let g' = (x, ([], xNew)) :: (xs, ([], tp1)) :: g in
+      let c3, tp3 = collect g' e3 in
+      (c1 @ c2 @ c3 @ [(tp1, TyList xNew); (tp2, tp3)], tp2)
+  (* Maybe related *)
+  | Nothing ->
+      ([], TyMaybe (TyVar (newvar ())))
+  | Just e ->
+      let c1, tp1 = collect g e in
+      (c1, TyMaybe tp1)
+  | MatchMaybe (e1, e2, x, e3) ->
+      let c1, tp1 = collect g e1 in
+      let c2, tp2 = collect g e2 in
+      let xNew = TyVar (newvar ()) in
+      let g' = (x, ([], xNew)) :: g in
+      let c3, tp3 = collect g' e3 in
+      (c1 @ c2 @ c3 @ [(tp1, TyMaybe xNew); (tp2, tp3)], tp2)
+  (* Either related*)
+  | Left e ->
+      let c, tp = collect g e in
+      let xNew = TyVar (newvar ()) in
+      (c, TyEither (tp, xNew))
+  | Right e ->
+      let c, tp = collect g e in
+      let xNew = TyVar (newvar ()) in
+      (c, TyEither (xNew, tp))
+  | MatchEither (e1, x, e2, y, e3) ->
+      let c1, tp1 = collect g e1 in
+      let xNew = TyVar (newvar ()) in
+      let yNew = TyVar (newvar ()) in
+      let gx = (x, ([], xNew)) :: g in
+      let c2, tp2 = collect gx e2 in
+      let gy = (y, ([], yNew)) :: g in
+      let c3, tp3 = collect gy e3 in
+      (c1 @ c2 @ c3 @ [(tp1, TyEither (xNew, yNew)); (tp2, tp3)], tp2)
 
 (* INFERÊNCIA DE TIPOS - CHAMADA PRINCIPAL *)
-let type_infer (e : expr) : unit =
+let type_infer (e : expr) : bool =
   print_string "\nExpressão:\n" ;
   print_string (expr_str e) ;
   print_string "\n\n" ;
   try
     let c, tp = collect [] e in
-    let s = unify c in
-    let tf = appsubs s tp in
     print_string "\nEquações de tipo coletadas:\n" ;
     print_equacoes c ;
+    let s = unify c in
+    let tf = appsubs s tp in
     print_string "Tipo inferido: " ;
     print_string (tipo_str tp) ;
     print_string "\n\nSubstituição produzida por unify:\n" ;
     print_subst s ;
     print_string "Tipo inferido (após subs): " ;
     print_string (tipo_str tf) ;
-    print_string "\n\n"
+    print_string "\n\n" ;
+    true
   with
   | CollectFail x ->
       print_string "Erro: variável " ;
       print_string x ;
-      print_string "não declarada!\n\n"
+      print_string "não declarada!\n\n" ;
+      false
   | UnifyFail (tp1, tp2) ->
       print_string "Erro: impossível unificar os tipos\n* " ;
       print_string (tipo_str tp1) ;
       print_string "\n* " ;
       print_string (tipo_str tp2) ;
-      print_string "\n\n"
+      print_string "\n\n" ;
+      false
 
 (*===============================================*)
 
@@ -429,6 +494,12 @@ type valor =
   | VPair of valor * valor
   | VClos of ident * expr * renv
   | VRclos of ident * ident * expr * renv
+  | VNil
+  | VNothing
+  | VJust of valor
+  | VLeft of valor
+  | VRight of valor
+  | VList of valor * valor
 
 and renv = (ident * valor) list
 
@@ -506,3 +577,74 @@ let rec eval (renv : renv) (e : expr) : valor =
   | LetRec (f, x, e1, e2) ->
       let renv' = update renv f (VRclos (f, x, e1, renv)) in
       eval renv' e2
+  | Pipe (e1, e2) -> (
+      let v1 = eval renv e1 in
+      let close = eval renv e2 in
+      match close with
+      | VClos (x, ebdy, renv') ->
+          let renv'' = update renv' x v1 in
+          eval renv'' ebdy
+      | VRclos (f, x, ebdy, renv') ->
+          let renv'' = update renv' x v1 in
+          let renv''' = update renv'' f close in
+          eval renv''' ebdy
+      | _ ->
+          raise BugTypeInfer )
+  | Nil ->
+      VNil
+  | Node (e1, e2) ->
+      let v1 = eval renv e1 in
+      let v2 = eval renv e2 in
+      VList (v1, v2)
+  | MatchList (e1, e2, x, xs, e3) -> (
+      let v1 = eval renv e1 in
+      match v1 with
+      | VNil ->
+          eval renv e2
+      | VList (v, vs) ->
+          eval (update (update renv x v) xs vs) e3
+      | _ ->
+          raise BugTypeInfer )
+  | Nothing ->
+      VNothing
+  | Just e ->
+      let v1 = eval renv e in
+      VJust v1
+  | MatchMaybe (e1, e2, x, e3) -> (
+      let v1 = eval renv e1 in
+      match v1 with
+      | VNothing ->
+          eval renv e2
+      | VJust v ->
+          eval (update renv x v) e3
+      | _ ->
+          raise BugTypeInfer )
+  | Left e ->
+      VLeft (eval renv e)
+  | Right e ->
+      VRight (eval renv e)
+  | MatchEither (e1, x, e2, y, e3) -> (
+      let v1 = eval renv e1 in
+      match v1 with
+      | VLeft v ->
+          eval (update renv x v) e2
+      | VRight v ->
+          eval (update renv y v) e3
+      | _ ->
+          raise BugTypeInfer )
+
+exception ExecFail
+
+let check_type (e : expr) : bool =
+  try
+    let c, tp = collect [] e in
+    let s = unify c in
+    let _ = appsubs s tp in
+    true
+  with
+  | CollectFail _ ->
+      false
+  | UnifyFail _ ->
+      false
+
+(*===============================================*)
