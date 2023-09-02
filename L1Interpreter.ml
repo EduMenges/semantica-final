@@ -1,6 +1,6 @@
 (* Auxiliares *)
 
-(* Dado uma lista de pares, pesquisa pela chave e reotrna o valor *)
+(* Dado uma lista de pares, pesquisa pela chave e retorna o valor *)
 let rec lookup amb key =
   match amb with
   | [] ->
@@ -8,7 +8,8 @@ let rec lookup amb key =
   | (head, item) :: tl ->
       if head = key then Some item else lookup tl key
 
-let update amb x item = (x, item) :: amb
+(* Insere um elemento no começo da lista *)
+let push_front amb x item = (x, item) :: amb
 
 (* Remove elementos repetidos de uma lista *)
 let nub l =
@@ -30,18 +31,6 @@ type tipo =
   | TyMaybe of tipo
   | TyVar of int (* Variáveis de tipo -- números *)
 
-(* Free type variables em um tipo. *)
-let rec ftv (tp : tipo) : int list =
-  match tp with
-  | TyInt | TyBool ->
-      []
-  | TyFn (t1, t2) | TyPair (t1, t2) | TyEither (t1, t2) ->
-      ftv t1 @ ftv t2
-  | TyList t | TyMaybe t ->
-      ftv t
-  | TyVar n ->
-      [n]
-
 (* Impressao legível de monotipos  *)
 let rec tipo_str (tp : tipo) : string =
   match tp with
@@ -50,9 +39,9 @@ let rec tipo_str (tp : tipo) : string =
   | TyBool ->
       "bool"
   | TyFn (t1, t2) ->
-      "(" ^ tipo_str t1 ^ "->" ^ tipo_str t2 ^ ")"
+      "(" ^ tipo_str t1 ^ " -> " ^ tipo_str t2 ^ ")"
   | TyPair (t1, t2) ->
-      "(" ^ tipo_str t1 ^ "*" ^ tipo_str t2 ^ ")"
+      "(" ^ tipo_str t1 ^ " * " ^ tipo_str t2 ^ ")"
   | TyEither (t1, t2) ->
       "either " ^ tipo_str t1 ^ " " ^ tipo_str t2
   | TyList t ->
@@ -128,7 +117,7 @@ let rec expr_str (e : expr) : string =
       "( " ^ expr_str e1 ^ " " ^ s ^ " " ^ expr_str e2 ^ " )"
   (* Pair related *)
   | Pair (e1, e2) ->
-      "(" ^ expr_str e1 ^ "," ^ expr_str e2 ^ ")"
+      "(" ^ expr_str e1 ^ ", " ^ expr_str e2 ^ ")"
   | Fst e1 ->
       "fst " ^ expr_str e1
   | Snd e1 ->
@@ -142,20 +131,20 @@ let rec expr_str (e : expr) : string =
   | App (e1, e2) ->
       "(" ^ expr_str e1 ^ " " ^ expr_str e2 ^ ")"
   | Let (x, e1, e2) ->
-      "(let " ^ x ^ "=" ^ expr_str e1 ^ "\nin " ^ expr_str e2 ^ " )"
+      "(let " ^ x ^ " = " ^ expr_str e1 ^ "\nin " ^ expr_str e2 ^ " )"
   | LetRec (f, x, e1, e2) ->
-      "(let rec " ^ f ^ "= fn " ^ x ^ " => " ^ expr_str e1 ^ "\nin "
+      "(let rec " ^ f ^ " = fn " ^ x ^ " => " ^ expr_str e1 ^ "\nin "
       ^ expr_str e2 ^ " )"
   | Pipe (e1, e2) ->
-      expr_str e1 ^ "|>" ^ expr_str e2
+      expr_str e1 ^ " |> " ^ expr_str e2
   (* List related *)
   | Nil ->
       "Nil"
   | Node (e1, e2) ->
-      expr_str e1 ^ "::" ^ expr_str e2
+      expr_str e1 ^ " :: " ^ expr_str e2
   | MatchList (e1, e2, x, xs, e3) ->
-      "match " ^ expr_str e1 ^ " with nil => " ^ expr_str e2 ^ "| " ^ x ^ "::"
-      ^ xs ^ " =>" ^ expr_str e3
+      "match " ^ expr_str e1 ^ " with nil => " ^ expr_str e2 ^ "| " ^ x ^ " :: "
+      ^ xs ^ " => " ^ expr_str e3
   (* Maybe related *)
   | Nothing ->
       "nothing"
@@ -170,8 +159,54 @@ let rec expr_str (e : expr) : string =
   | Right e ->
       "right " ^ expr_str e
   | MatchEither (e1, x, e2, y, e3) ->
-      "match " ^ expr_str e1 ^ "with left " ^ x ^ " => " ^ expr_str e2
-      ^ "| right " ^ y ^ " => " ^ expr_str e3
+      "match " ^ expr_str e1 ^ " with left " ^ x ^ " => " ^ expr_str e2
+      ^ " | right " ^ y ^ " => " ^ expr_str e3
+
+(* Código para geração de novas variáveis de tipo *)
+let lastvar = ref 0
+
+let newvar (_ : unit) : int =
+  let x = !lastvar in
+  lastvar := x + 1 ;
+  x
+
+(* Substituições de tipo
+    int - Variável do tipo
+    tipo - O tipo para substituir
+*)
+type subst = (int * tipo) list
+
+(* Imprime substituições *)
+let rec print_subst (s : subst) =
+  match s with
+  | [] ->
+      print_string "\n"
+  | (a, b) :: t ->
+      print_string ("X" ^ string_of_int a) ;
+      print_string " |-> " ;
+      print_string (tipo_str b) ;
+      print_string "\n" ;
+      print_subst t
+
+(* Aplicação de substituição a tipo *)
+let rec app_subs (s : subst) (tp : tipo) : tipo =
+  match tp with
+  | TyInt ->
+      TyInt
+  | TyBool ->
+      TyBool
+  | TyFn (t1, t2) ->
+      TyFn (app_subs s t1, app_subs s t2)
+  | TyPair (t1, t2) ->
+      TyPair (app_subs s t1, app_subs s t2)
+  | TyEither (t1, t2) ->
+      TyEither (app_subs s t1, app_subs s t2)
+  | TyList t ->
+      TyList (app_subs s t)
+  | TyMaybe t ->
+      TyMaybe (app_subs s t)
+  | TyVar x -> (
+    match lookup s x with None -> TyVar x | Some tp' -> tp' )
 
 (* Equações de tipo.
     A lista
@@ -193,64 +228,20 @@ let rec print_equacoes (c : equacoes_tipo) =
       print_string "\n" ;
       print_equacoes t
 
-(* Código para geração de novas variáveis de tipo *)
-let lastvar = ref 0
-
-let newvar (_ : unit) : int =
-  let x = !lastvar in
-  lastvar := x + 1 ;
-  x
-
-(* Substituições de tipo
-    Variável de tipo
-    O tipo para substituir
-*)
-type subst = (int * tipo) list
-
-(* Imprime substituições *)
-let rec print_subst (s : subst) =
-  match s with
-  | [] ->
-      print_string "\n"
-  | (a, b) :: t ->
-      print_string ("X" ^ string_of_int a) ;
-      print_string " |-> " ;
-      print_string (tipo_str b) ;
-      print_string "\n" ;
-      print_subst t
-
-(* Aplicação de substituição a tipo *)
-let rec appsubs (s : subst) (tp : tipo) : tipo =
-  match tp with
-  | TyInt ->
-      TyInt
-  | TyBool ->
-      TyBool
-  | TyFn (t1, t2) ->
-      TyFn (appsubs s t1, appsubs s t2)
-  | TyPair (t1, t2) ->
-      TyPair (appsubs s t1, appsubs s t2)
-  | TyEither (t1, t2) ->
-      TyEither (appsubs s t1, appsubs s t2)
-  | TyList t ->
-      TyList (appsubs s t)
-  | TyMaybe t ->
-      TyMaybe (appsubs s t)
-  | TyVar x -> (
-    match lookup s x with None -> TyVar x | Some tp' -> tp' )
-
 (* Aplicação de substituição a coleção de constraints *)
-let appconstr (s : subst) (c : equacoes_tipo) : equacoes_tipo =
-  List.map (fun (a, b) -> (appsubs s a, appsubs s b)) c
+let app_constr (s : subst) (c : equacoes_tipo) : equacoes_tipo =
+  List.map (fun (a, b) -> (app_subs s a, app_subs s b)) c
 
-(* Composição de substituições: s1 o s2  *)
+(* Composição de substituições: s1 o s2
+   Equações com mesmo tipo são substituídos considerando-se as definições de s2.
+*)
 let compose (s1 : subst) (s2 : subst) : subst =
-  let r1 = List.map (fun (x, y) -> (x, appsubs s1 y)) s2 in
+  let r1 = List.map (fun (x, y) -> (x, app_subs s1 y)) s2 in
   let vs, _ = List.split s2 in
   let r2 = List.filter (fun (x, y) -> not (List.mem x vs)) s1 in
   r1 @ r2
 
-(* Testa se variável de tipo ocorre em tipo *)
+(* Testa se variável de tipo ocorre no tipo dado *)
 let rec var_in_tipo (v : int) (tp : tipo) : bool =
   match tp with
   | TyInt ->
@@ -270,13 +261,25 @@ let rec var_in_tipo (v : int) (tp : tipo) : bool =
   | TyVar x ->
       v = x
 
-(* Uma tupla contendo uma list de inteiros e um tipo *)
+(* Uma tupla contendo uma lista de inteiros (variáveis de tipo) e um tipo (restritivo) associado *)
 type politipo = int list * tipo
 
-(* Ambientes de tipo - modificados para polimorfismo *)
-type tyenv = (ident * politipo) list
+(* Free type variables em um tipo *)
+let rec ftv (tp : tipo) : int list =
+  match tp with
+  | TyInt | TyBool ->
+      []
+  | TyFn (t1, t2) | TyPair (t1, t2) | TyEither (t1, t2) ->
+      ftv t1 @ ftv t2
+  | TyList t | TyMaybe t ->
+      ftv t
+  | TyVar n ->
+      [n]
 
-let rec ftv_amb' (g : tyenv) : int list =
+(* Ambientes de tipo - modificados para polimorfismo *)
+type ty_env = (ident * politipo) list
+
+let rec ftv_amb' (g : ty_env) : int list =
   match g with
   | [] ->
       []
@@ -284,7 +287,7 @@ let rec ftv_amb' (g : tyenv) : int list =
       diff (ftv tp) vars @ ftv_amb' t
 
 (* Calcula todas as variáveis de tipo livres do ambiente de tipos *)
-let ftv_amb (g : tyenv) : int list = nub (ftv_amb' g)
+let ftv_amb (g : ty_env) : int list = nub (ftv_amb' g)
 
 (* Cria novas variáveis para politipos quando estes são instanciados *)
 let rec renamevars (pltp : politipo) : tipo =
@@ -293,7 +296,7 @@ let rec renamevars (pltp : politipo) : tipo =
       tp
   | h :: vars', tp ->
       let h' = newvar () in
-      appsubs [(h, TyVar h')] (renamevars (vars', tp))
+      app_subs [(h, TyVar h')] (renamevars (vars', tp))
 
 (* Unificação *)
 exception UnifyFail of (tipo * tipo)
@@ -320,17 +323,17 @@ let rec unify (c : equacoes_tipo) : subst =
       unify c'
   | (TyVar x1, tp2) :: c' ->
       if var_in_tipo x1 tp2 then raise (UnifyFail (TyVar x1, tp2))
-      else compose (unify (appconstr [(x1, tp2)] c')) [(x1, tp2)]
+      else compose (unify (app_constr [(x1, tp2)] c')) [(x1, tp2)]
   | (tp1, TyVar x2) :: c' ->
       if var_in_tipo x2 tp1 then raise (UnifyFail (tp1, TyVar x2))
-      else compose (unify (appconstr [(x2, tp1)] c')) [(x2, tp1)]
+      else compose (unify (app_constr [(x2, tp1)] c')) [(x2, tp1)]
   | (tp1, tp2) :: _' ->
       raise (UnifyFail (tp1, tp2))
 
 (* Coleta *)
 exception CollectFail of string
 
-let rec collect (g : tyenv) (e : expr) : equacoes_tipo * tipo =
+let rec collect (g : ty_env) (e : expr) : equacoes_tipo * tipo =
   match e with
   | Var x -> (
     match lookup g x with
@@ -385,7 +388,7 @@ let rec collect (g : tyenv) (e : expr) : equacoes_tipo * tipo =
   | Let (x, e1, e2) ->
       let c1, tp1 = collect g e1 in
       let s1 = unify c1 in
-      let tf1 = appsubs s1 tp1 in
+      let tf1 = app_subs s1 tp1 in
       let polivars = nub (diff (ftv tf1) (ftv_amb g)) in
       let g' = (x, (polivars, tf1)) :: g in
       let c2, tp2 = collect g' e2 in
@@ -397,7 +400,7 @@ let rec collect (g : tyenv) (e : expr) : equacoes_tipo * tipo =
       let g1 = (x, ([], TyVar tA)) :: g2 in
       let c1, tp1 = collect g1 e1 in
       let s1 = unify (c1 @ [(tp1, TyVar tB)]) in
-      let tf1 = appsubs s1 (TyFn (TyVar tA, TyVar tB)) in
+      let tf1 = app_subs s1 (TyFn (TyVar tA, TyVar tB)) in
       let polivars = nub (diff (ftv tf1) (ftv_amb g)) in
       let g' = (f, (polivars, tf1)) :: g in
       let c2, tp2 = collect g' e2 in
@@ -463,7 +466,7 @@ let type_infer (e : expr) : bool =
     print_string "\nEquações de tipo coletadas:\n" ;
     print_equacoes c ;
     let s = unify c in
-    let tf = appsubs s tp in
+    let tf = app_subs s tp in
     print_string "Tipo inferido: " ;
     print_string (tipo_str tp) ;
     print_string "\n\nSubstituição produzida por unify:\n" ;
@@ -563,30 +566,30 @@ let rec eval (renv : renv) (e : expr) : valor =
       let v2 = eval renv e2 in
       match v1 with
       | VClos (x, ebdy, renv') ->
-          let renv'' = update renv' x v2 in
+          let renv'' = push_front renv' x v2 in
           eval renv'' ebdy
       | VRclos (f, x, ebdy, renv') ->
-          let renv'' = update renv' x v2 in
-          let renv''' = update renv'' f v1 in
+          let renv'' = push_front renv' x v2 in
+          let renv''' = push_front renv'' f v1 in
           eval renv''' ebdy
       | _ ->
           raise BugTypeInfer )
   | Let (x, e1, e2) ->
       let v1 = eval renv e1 in
-      eval (update renv x v1) e2
+      eval (push_front renv x v1) e2
   | LetRec (f, x, e1, e2) ->
-      let renv' = update renv f (VRclos (f, x, e1, renv)) in
+      let renv' = push_front renv f (VRclos (f, x, e1, renv)) in
       eval renv' e2
   | Pipe (e1, e2) -> (
       let v1 = eval renv e1 in
       let close = eval renv e2 in
       match close with
       | VClos (x, ebdy, renv') ->
-          let renv'' = update renv' x v1 in
+          let renv'' = push_front renv' x v1 in
           eval renv'' ebdy
       | VRclos (f, x, ebdy, renv') ->
-          let renv'' = update renv' x v1 in
-          let renv''' = update renv'' f close in
+          let renv'' = push_front renv' x v1 in
+          let renv''' = push_front renv'' f close in
           eval renv''' ebdy
       | _ ->
           raise BugTypeInfer )
@@ -602,7 +605,7 @@ let rec eval (renv : renv) (e : expr) : valor =
       | VNil ->
           eval renv e2
       | VList (v, vs) ->
-          eval (update (update renv x v) xs vs) e3
+          eval (push_front (push_front renv x v) xs vs) e3
       | _ ->
           raise BugTypeInfer )
   | Nothing ->
@@ -616,7 +619,7 @@ let rec eval (renv : renv) (e : expr) : valor =
       | VNothing ->
           eval renv e2
       | VJust v ->
-          eval (update renv x v) e3
+          eval (push_front renv x v) e3
       | _ ->
           raise BugTypeInfer )
   | Left e ->
@@ -627,9 +630,9 @@ let rec eval (renv : renv) (e : expr) : valor =
       let v1 = eval renv e1 in
       match v1 with
       | VLeft v ->
-          eval (update renv x v) e2
+          eval (push_front renv x v) e2
       | VRight v ->
-          eval (update renv y v) e3
+          eval (push_front renv y v) e3
       | _ ->
           raise BugTypeInfer )
 
@@ -639,7 +642,7 @@ let check_type (e : expr) : bool =
   try
     let c, tp = collect [] e in
     let s = unify c in
-    let _ = appsubs s tp in
+    let _ = app_subs s tp in
     true
   with
   | CollectFail _ ->
@@ -647,4 +650,6 @@ let check_type (e : expr) : bool =
   | UnifyFail _ ->
       false
 
-(*===============================================*)
+(* Test aux function *)
+let exec (e : expr) : valor =
+  match check_type e with true -> eval [] e | false -> raise ExecFail
