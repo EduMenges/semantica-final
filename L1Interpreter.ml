@@ -8,8 +8,9 @@ let rec lookup amb key =
   | (head, item) :: tl ->
       if head = key then Some item else lookup tl key
 
-(* Insere um elemento no começo da lista *)
-let push_front amb x item = (x, item) :: amb
+(* Insere um elemento no começo da lista.
+   Usado para extensão do ambiente, permitindo o shadowing das expressões. *)
+let extend amb x item = (x, item) :: amb
 
 (* Remove elementos repetidos de uma lista *)
 let nub l =
@@ -114,7 +115,7 @@ let rec expr_str (e : expr) : string =
         | Gt ->
             ">"
       in
-      "( " ^ expr_str e1 ^ " " ^ s ^ " " ^ expr_str e2 ^ " )"
+      "(" ^ expr_str e1 ^ " " ^ s ^ " " ^ expr_str e2 ^ ")"
   (* Pair related *)
   | Pair (e1, e2) ->
       "(" ^ expr_str e1 ^ ", " ^ expr_str e2 ^ ")"
@@ -124,17 +125,17 @@ let rec expr_str (e : expr) : string =
       "snd " ^ expr_str e1
   | If (e1, e2, e3) ->
       "(if " ^ expr_str e1 ^ " then " ^ expr_str e2 ^ " else " ^ expr_str e3
-      ^ " )"
+      ^ ")"
   (* Function related *)
   | Fn (x, e1) ->
-      "(fn " ^ x ^ " => " ^ expr_str e1 ^ " )"
+      "(fn " ^ x ^ " => " ^ expr_str e1 ^ ")"
   | App (e1, e2) ->
       "(" ^ expr_str e1 ^ " " ^ expr_str e2 ^ ")"
   | Let (x, e1, e2) ->
-      "(let " ^ x ^ " = " ^ expr_str e1 ^ "\nin " ^ expr_str e2 ^ " )"
+      "(let " ^ x ^ " = " ^ expr_str e1 ^ "\nin " ^ expr_str e2 ^ ")"
   | LetRec (f, x, e1, e2) ->
       "(let rec " ^ f ^ " = fn " ^ x ^ " => " ^ expr_str e1 ^ "\nin "
-      ^ expr_str e2 ^ " )"
+      ^ expr_str e2 ^ ")"
   | Pipe (e1, e2) ->
       expr_str e1 ^ " |> " ^ expr_str e2
   (* List related *)
@@ -172,8 +173,7 @@ let newvar (_ : unit) : int =
 
 (* Substituições de tipo
     int - Variável do tipo
-    tipo - O tipo para substituir
-*)
+    tipo - O tipo correspondente para substituir *)
 type subst = (int * tipo) list
 
 (* Imprime substituições *)
@@ -188,7 +188,7 @@ let rec print_subst (s : subst) =
       print_string "\n" ;
       print_subst t
 
-(* Aplicação de substituição a tipo *)
+(* Aplicação de substituição de tipos *)
 let rec app_subs (s : subst) (tp : tipo) : tipo =
   match tp with
   | TyInt ->
@@ -206,6 +206,8 @@ let rec app_subs (s : subst) (tp : tipo) : tipo =
   | TyMaybe t ->
       TyMaybe (app_subs s t)
   | TyVar x -> (
+    (* Caso a variável não se encontre na lista de substituições, ela é mantida,
+       do contrário, é substituída pelo tipo correspondente *)
     match lookup s x with None -> TyVar x | Some tp' -> tp' )
 
 (* Equações de tipo.
@@ -228,20 +230,20 @@ let rec print_equacoes (c : equacoes_tipo) =
       print_string "\n" ;
       print_equacoes t
 
-(* Aplicação de substituição a coleção de constraints *)
+(* Aplicação de substituição a coleção de constraints.
+   Dado as equações de tipo, aplica todas as substituições. *)
 let app_constr (s : subst) (c : equacoes_tipo) : equacoes_tipo =
   List.map (fun (a, b) -> (app_subs s a, app_subs s b)) c
 
 (* Composição de substituições: s1 o s2
-   Equações com mesmo tipo são substituídos considerando-se as definições de s2.
-*)
+   Equações com mesmo tipo são substituídos considerando-se as definições de s2. *)
 let compose (s1 : subst) (s2 : subst) : subst =
   let r1 = List.map (fun (x, y) -> (x, app_subs s1 y)) s2 in
   let vs, _ = List.split s2 in
   let r2 = List.filter (fun (x, y) -> not (List.mem x vs)) s1 in
   r1 @ r2
 
-(* Testa se variável de tipo ocorre no tipo dado *)
+(* Testa se variável de tipo (TyVar) ocorre no tipo dado *)
 let rec var_in_tipo (v : int) (tp : tipo) : bool =
   match tp with
   | TyInt ->
@@ -566,30 +568,30 @@ let rec eval (renv : renv) (e : expr) : valor =
       let v2 = eval renv e2 in
       match v1 with
       | VClos (x, ebdy, renv') ->
-          let renv'' = push_front renv' x v2 in
+          let renv'' = extend renv' x v2 in
           eval renv'' ebdy
       | VRclos (f, x, ebdy, renv') ->
-          let renv'' = push_front renv' x v2 in
-          let renv''' = push_front renv'' f v1 in
+          let renv'' = extend renv' x v2 in
+          let renv''' = extend renv'' f v1 in
           eval renv''' ebdy
       | _ ->
           raise BugTypeInfer )
   | Let (x, e1, e2) ->
       let v1 = eval renv e1 in
-      eval (push_front renv x v1) e2
+      eval (extend renv x v1) e2
   | LetRec (f, x, e1, e2) ->
-      let renv' = push_front renv f (VRclos (f, x, e1, renv)) in
+      let renv' = extend renv f (VRclos (f, x, e1, renv)) in
       eval renv' e2
   | Pipe (e1, e2) -> (
       let v1 = eval renv e1 in
       let close = eval renv e2 in
       match close with
       | VClos (x, ebdy, renv') ->
-          let renv'' = push_front renv' x v1 in
+          let renv'' = extend renv' x v1 in
           eval renv'' ebdy
       | VRclos (f, x, ebdy, renv') ->
-          let renv'' = push_front renv' x v1 in
-          let renv''' = push_front renv'' f close in
+          let renv'' = extend renv' x v1 in
+          let renv''' = extend renv'' f close in
           eval renv''' ebdy
       | _ ->
           raise BugTypeInfer )
@@ -605,7 +607,7 @@ let rec eval (renv : renv) (e : expr) : valor =
       | VNil ->
           eval renv e2
       | VList (v, vs) ->
-          eval (push_front (push_front renv x v) xs vs) e3
+          eval (extend (extend renv x v) xs vs) e3
       | _ ->
           raise BugTypeInfer )
   | Nothing ->
@@ -619,7 +621,7 @@ let rec eval (renv : renv) (e : expr) : valor =
       | VNothing ->
           eval renv e2
       | VJust v ->
-          eval (push_front renv x v) e3
+          eval (extend renv x v) e3
       | _ ->
           raise BugTypeInfer )
   | Left e ->
@@ -630,9 +632,9 @@ let rec eval (renv : renv) (e : expr) : valor =
       let v1 = eval renv e1 in
       match v1 with
       | VLeft v ->
-          eval (push_front renv x v) e2
+          eval (extend renv x v) e2
       | VRight v ->
-          eval (push_front renv y v) e3
+          eval (extend renv y v) e3
       | _ ->
           raise BugTypeInfer )
 
